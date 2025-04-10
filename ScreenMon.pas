@@ -3,77 +3,88 @@ unit ScreenMon;
 interface
 
 uses
-   Windows, Classes, SysUtils, Graphics, Math,ZLibEx,AtermisClient,ServerThread,atermisWorker,syncobjs;
+  Windows, Classes, SysUtils, Graphics, Math, ZLibEx, AtermisClient, ServerThread, atermisWorker, syncobjs;
+
 const
-  FrameCountAfterFullShot=20;
+  FrameCountAfterFullShot = 20;
 
   DEF_STEP = 19;
-  OFF_SET  = 32;
+  OFF_SET = 32;
+
 type
-  TScreenMon = class(TThread)
+  TScreenMon = class (TThread)
   private
-    
-    FBmp1, FBmp2, FBmp3: Graphics.TBitmap;
-		cBMP1, cBMP2, cBMP3: HBITMAP;
-    FWidth, FHeight, FLine, FInc, debugcount: Integer;
+    FBmp1: Graphics.TBitmap;
+    FBmp2: Graphics.TBitmap;
+    FBmp3: Graphics.TBitmap;
+    cBMP1: HBITMAP;
+    cBMP2: HBITMAP;
+    cBMP3: HBITMAP;
+    FWidth: Integer;
+    FHeight: Integer;
+    FLine: Integer;
+    FInc: Integer;
+    debugcount: Integer;
     FRects: array[0..8] of TRect;
-		FRect:TRect;
+    FRect: TRect;
     FDC: HDC;
-		isWaiting:boolean;
+    isWaiting: boolean;
     FCursor: HCURSOR;
     FCurPos: TPoint;
-    //
-    mEvent:TEventObject;
+
+    mEvent: TEventObject;
     FPixelFormat: TPixelFormat;
+
     procedure SetPixelFormat(Value: TPixelFormat);
-    function getColorDepth():integer;
+    function getColorDepth(): integer;
     procedure SaveRect(rt: TRect);
     procedure SendRect;
     procedure CopyRect(rt: TRect);
   protected
-	  aFullFrame:integer;
-		function compress(nCmd: Byte):integer;
-		procedure Execute; override;
+    aFullFrame: integer;
+    function compress(nCmd: byte): integer;
+    procedure Execute; override;
   public
-	  Fms1, FmsOut: TMemoryStream;
-		idataType:integer;
-    atermisserver:TCPServerThread;
-    aclient:TAtermisClient;
-    constructor Create(xw,yh:integer); reintroduce;
+    Fms1, FmsOut: TMemoryStream;
+    idataType: integer;
+    atermisserver: TCPServerThread;
+    aclient: TAtermisClient;
+    constructor Create(xw, yh: integer); reintroduce;
     destructor Destroy; override;
     procedure GetFullshot;
     procedure GetPartshot;
-    function GetNext:integer;
-    function CheckScr: Boolean;
-		procedure sendFullShot(idx:integer);
-		function setScreen(nW, nH: Integer): Boolean;
+    function GetNext: integer;
+    function CheckScr: boolean;
+    procedure sendFullShot(idx: integer);
+    function setScreen(nW, nH: integer): boolean;
   end;
 
 implementation
 
-function TScreenMon.getColorDepth():integer;
+function TScreenMon.getColorDepth(): integer;
 var
-	h: HDC;
-	//Bits: integer ;
+  h: HDC;
+  //Bits: integer ;
 begin
-	h := GetDC(0);
-	result := GetDeviceCaps(h, BITSPIXEL);
-	{case Bits of
-	1: ShowMessage('Monochrome');
-	4: ShowMessage('16 color');
-	8: ShowMessage('256 color');
-	16: ShowMessage('16-bit color');
-	24: ShowMessage('24-bit color');
-	end ;}
-	ReleaseDC(0, h);
+  h := GetDC(0);
+  Result := GetDeviceCaps(h, BITSPIXEL);
+  {case Bits of
+  1: ShowMessage('Monochrome');
+  4: ShowMessage('16 color');
+  8: ShowMessage('256 color');
+  16: ShowMessage('16-bit color');
+  24: ShowMessage('24-bit color');
+  end ;}
+  ReleaseDC(0, h);
 end;
+
 procedure TScreenMon.SetPixelFormat(Value: TPixelFormat);
 begin
   FPixelFormat := Value;
   case FPixelFormat of
-    pf1bit:  FInc := 32;
-    pf4bit:  FInc := 8;
-    pf8bit:  FInc := 4;
+    pf1bit: FInc := 32;
+    pf4bit: FInc := 8;
+    pf8bit: FInc := 4;
     pf16bit: FInc := 2;
     pf32bit: FInc := 1;
     else
@@ -81,68 +92,72 @@ begin
       FInc := 4;
   end;
 end;
-constructor TScreenMon.Create(xw,yh:integer);
+
+constructor TScreenMon.Create(xw, yh: integer);
 begin
-  inherited Create(true);
-  Fms1  := TMemoryStream.Create;
-  FmsOut  := TMemoryStream.Create;
-	SetPixelFormat(TPixelFormat(getColorDepth()));//set FInc and FPixelFormat
+  inherited Create(True);
+  Fms1 := TMemoryStream.Create;
+  FmsOut := TMemoryStream.Create;
+  SetPixelFormat(TPixelFormat(getColorDepth()));//set FInc and FPixelFormat
   FBmp1 := Graphics.TBitmap.Create;
   FBmp2 := Graphics.TBitmap.Create;
   FBmp3 := Graphics.TBitmap.Create;
-	FBmp1.PixelFormat := pf32bit;
-	FBmp2.PixelFormat := pf32bit;
-	FBmp3.PixelFormat := pf32bit;
+  FBmp1.PixelFormat := pf32bit;
+  FBmp2.PixelFormat := pf32bit;
+  FBmp3.PixelFormat := pf32bit;
   FInc := 1;
-  FWidth  := 0;
+  FWidth := 0;
   FHeight := 0;
-	aFullFrame:=0;
+  aFullFrame := 0;
   FCursor := LoadCursor(0, IDC_ARROW);
-	setScreen(xw,yh);
-	debugcount:=0;
-	mEvent := TEventObject.Create(nil,true,false,'');
+  setScreen(xw, yh);
+  debugcount := 0;
+  mEvent := TEventObject.Create(nil, True, False, '');
 end;
-procedure TScreenMon.sendFullShot(idx:integer);
+
+procedure TScreenMon.sendFullShot(idx: integer);
 begin
   GetFullshot;
-	if isWaiting then
+  if isWaiting then
     mEvent.SetEvent;
-  if idx=-1 then
+  if idx = -1 then
   begin
-    aclient.sendScreen(idataType,FmsOut.Memory, FmsOut.Size );
+    aclient.SendScreen(idataType, FmsOut.Memory, FmsOut.Size);
   end
   else
   begin
-    atermisserver.workers[idx].sendScreen(idataType,FmsOut.Memory, FmsOut.Size );
+    atermisserver.Workers[idx].SendScreen(idataType, FmsOut.Memory, FmsOut.Size);
   end;
 end;
+
 procedure TScreenMon.Execute;
 var
-  i,j:integer;
+  i, j: integer;
 begin
   while (not Terminated) do
   begin
     if {(aFullFrame=0) or} (CheckScr) then
-  	begin
-  	  aFullFrame:=FrameCountAfterFullShot;
-  		GetFullshot;
-  	end
-  	else
-  	begin
-  	  dec(aFullFrame);
-  		//GetPartshot;
-      j:=getNext;
-    	if j=0 then
-    	begin
-    	  isWaiting:=true;
+    begin
+      aFullFrame := FrameCountAfterFullShot;
+      GetFullshot;
+    end
+    else
+    begin
+      Dec(aFullFrame);
+      //GetPartshot;
+      j := getNext;
+      if j = 0 then
+      begin
+        isWaiting := True;
         mEvent.WaitFor(INFINITE);
         mEvent.ResetEvent;
-    	end;
-  	end;
+      end;
+    end;
     Sleep(30);
-		//break;
+    //break;
   end;
 end;
+
 destructor TScreenMon.Destroy;
 begin
   mEvent.SetEvent;
@@ -151,47 +166,47 @@ begin
   //FBmp3.Free;
   FBmp1.Free;
   FBmp2.Free;
-	//mEvent.free;
+  //mEvent.free;
   inherited;
 end;
 
-function TScreenMon.setScreen(nW, nH: Integer): Boolean;
-
+function TScreenMon.setScreen(nW, nH: integer): boolean;
 begin
   Result := False;
   //nW := GetSystemMetrics(SM_CXSCREEN);
   //nH := GetSystemMetrics(SM_CYSCREEN);
   if (nW <> FWidth) or (nH <> FHeight) then
   begin
-    FLine   := 0;
-    FWidth  := nW;
+    FLine := 0;
+    FWidth := nW;
     FHeight := nH;
-    FBmp1.Width  := FWidth;
+    FBmp1.Width := FWidth;
     FBmp1.Height := FHeight;
-    FBmp2.Width  := FWidth;
+    FBmp2.Width := FWidth;
     FBmp2.Height := 1;
     Result := True;
   end;
 end;
-function TScreenMon.CheckScr: Boolean;
+
+function TScreenMon.CheckScr: boolean;
 var
-  nWidth, nHeight: Integer;
+  nWidth, nHeight: integer;
 begin
-  Result  := False;
-  nWidth  := GetSystemMetrics(SM_CXSCREEN);
+  Result := False;
+  nWidth := GetSystemMetrics(SM_CXSCREEN);
   nHeight := GetSystemMetrics(SM_CYSCREEN);
   if (nWidth <> FWidth) or (nHeight <> FHeight) then
   begin
-    FWidth  := nWidth;
+    FWidth := nWidth;
     FHeight := nHeight;
-    FBmp1.Width  := FWidth;
+    FBmp1.Width := FWidth;
     FBmp1.Height := FHeight;
-    FBmp2.Width  := FWidth;
+    FBmp2.Width := FWidth;
     FBmp2.Height := 1;
     FBmp1.PixelFormat := FPixelFormat;
     FBmp2.PixelFormat := FPixelFormat;
     FBmp3.PixelFormat := FPixelFormat;
-    FLine  := 0;
+    FLine := 0;
     Result := True;
   end;
 end;
@@ -204,21 +219,21 @@ procedure TScreenMon.GetFullshot;
 begin
   //GetCursorPos(FCurPos);
   FDC := GetDC(0);//GetDC(0);
-	try
-  	//FBmp1.SetSize(FWidth, FHeight);
-		//cBMP1 := CreateCompatibleBitmap(FDC, FWidth, FHeight);
-  	//FBmp1.Handle:=cBMP1;
+  try
+    //FBmp1.SetSize(FWidth, FHeight);
+    //cBMP1 := CreateCompatibleBitmap(FDC, FWidth, FHeight);
+    //FBmp1.Handle:=cBMP1;
     //BitBlt(FBmp1.Canvas.Handle, 0, 0, FWidth, FHeight, FDC, 0, 0, SRCCOPY or $40000000);
-    FLine:=0;
-		FBmp1.LoadFromDevice(FDC);
+    FLine := 0;
+    FBmp1.LoadFromDevice(FDC);
     //DrawIcon(FBmp1.Canvas.Handle, FCurPos.X - 10, FCurPos.Y - 10, FCursor);
 
-	finally
+  finally
     ReleaseDC(0, FDC);
-		//DeleteObject(cBMP1);
-	end;
+    //DeleteObject(cBMP1);
+  end;
   Fms1.Clear;
-	//FBmp1.SaveToFile('cap1.bmp');
+  //FBmp1.SaveToFile('cap1.bmp');
   //debugcount:=debugcount+1;
   compress(21);
 end;
@@ -322,9 +337,13 @@ that is
 //cpu 13%
 procedure TScreenMon.GetPartshot;
 var
-  i,j,k,hasleftpoint,lastpoint,incsize,pixelpos,ppos,bottomline:integer;
-  p1,p2,p3:pbyte;
-  pixel1,pixel2:uint32;
+  i, j, k,
+  hasleftpoint,
+  lastpoint,
+  incsize, pixelpos,
+  ppos, bottomline: integer;
+  p1, p2, p3: PByte;
+  pixel1, pixel2: uint32;
 begin
   FDC := GetDC(GetDesktopWindow);
   i := 0;
@@ -334,113 +353,113 @@ begin
   //FBmp2.Canvas.Changed;
   FBmp2.LoadFromDevice(FDC);
   ReleaseDC(GetDesktopWindow, FDC);
-  incsize:=PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
+  incsize := PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
   while i < FBmp1.Height do
   begin
-    p1:=FBmp1.ScanLine[i];
-    p2:=FBmp2.ScanLine[i];
-    j:=0;
-    pixelpos:=0;
-    hasleftpoint:=0;
-    pixel1:=0;
-    pixel2:=0;
-    while j<FBmp1.Width*incsize do
+    p1 := FBmp1.ScanLine[i];
+    p2 := FBmp2.ScanLine[i];
+    j := 0;
+    pixelpos := 0;
+    hasleftpoint := 0;
+    pixel1 := 0;
+    pixel2 := 0;
+    while j < FBmp1.Width * incsize do
     begin
-      move(p1[j],pixel1,3);
-      move(p2[j],pixel2,3);
-      if (pixel1<>pixel2) then
+      move(p1[j], pixel1, 3);
+      move(p2[j], pixel2, 3);
+      if (pixel1 <> pixel2) then
       begin
-        if (hasleftpoint=0) then
+        if (hasleftpoint = 0) then
         begin
-          FRect.Left:=pixelpos;
-          FRect.top:=i;
-          hasleftpoint:=1;
+          FRect.Left := pixelpos;
+          FRect.top := i;
+          hasleftpoint := 1;
         end
         else
         begin
-          FRect.Right:=pixelpos+1;
-          ppos:=j;
-          FRect.Bottom:=i;
-          hasleftpoint:=2;
+          FRect.Right := pixelpos + 1;
+          ppos := j;
+          FRect.Bottom := i;
+          hasleftpoint := 2;
         end;
       end;
-      inc(j,incsize);
-      inc(pixelpos);
+      Inc(j, incsize);
+      Inc(pixelpos);
     end;
-    lastpoint:=0;
+    lastpoint := 0;
     //孤點,
     //1. X 軸 可能為實三角形的下一行的點，需要extend 上一個 PRECT ? ，也有可能真的只有一個點啊，也可能是一條直線
     //   出現孤點前，一定有一個窄長方型的RECT?
     //2. Y 軸，空三角形的點，往下可以找得到的，因為三角形一定有底，但用現在檢測方式則會出事，但也有只有兩點變的情況，例如在畫畫
-    if hasleftpoint=1 then
+    if hasleftpoint = 1 then
     begin
-      FRect.Right:=FRect.Left+32;
-      FRect.Bottom:=i;
-      hasleftpoint:=2;
+      FRect.Right := FRect.Left + 32;
+      FRect.Bottom := i;
+      hasleftpoint := 2;
     end;
-    if hasleftpoint=2 then
+    if hasleftpoint = 2 then
     begin
-      bottomline:=i;
-      while bottomline>FBmp1.Height do
+      bottomline := i;
+      while bottomline > FBmp1.Height do
       begin
-         inc(bottomline,1);
-         p1:=FBmp1.ScanLine[bottomline];
-         p2:=FBmp2.ScanLine[bottomline];
-         move(p1[ppos],pixel1,3);
-         move(p2[ppos],pixel2,3);
-         if pixel1=pixel2 then
-         begin
-            //move(p1[result.Left+1],pixel1,3);
-            //move(p2[result.Left+1],pixel2,3);
-            //if pixel1=pixel2 then
-            //begin
-              FRect.Bottom:=bottomline;
-              lastpoint:=bottomline;
-              break;
-            //end;
-         end;
-        
+        Inc(bottomline, 1);
+        p1 := FBmp1.ScanLine[bottomline];
+        p2 := FBmp2.ScanLine[bottomline];
+        move(p1[ppos], pixel1, 3);
+        move(p2[ppos], pixel2, 3);
+        if pixel1 = pixel2 then
+        begin
+          //move(p1[result.Left+1],pixel1,3);
+          //move(p2[result.Left+1],pixel2,3);
+          //if pixel1=pixel2 then
+          //begin
+          FRect.Bottom := bottomline;
+          lastpoint := bottomline;
+          break;
+          //end;
+        end;
+
       end;
       //if (lastpoint=0) or (FRect.Height<4) then
       //begin
       //   FRect.Bottom:=FRect.top+8;
       //end;
       //調整大小
-      if FRect.Left>32 then
-          FRect.Left  :=FRect.Left-32;
-      if FRect.Right<FWidth-32 then
-          FRect.Right :=FRect.Right+32;
-      if FRect.Bottom<FHeight-19 then
-          FRect.Bottom:=FRect.Bottom+19;
+      if FRect.Left > 32 then
+        FRect.Left := FRect.Left - 32;
+      if FRect.Right < FWidth - 32 then
+        FRect.Right := FRect.Right + 32;
+      if FRect.Bottom < FHeight - 19 then
+        FRect.Bottom := FRect.Bottom + 19;
       //start copy rect to send out FBmp3
       FBmp3 := Graphics.TBitmap.Create;
-      FBmp3.SetSize(FRect.Width,FRect.Height);
-      FBmp3.PixelFormat:=FBmp2.PixelFormat;
+      FBmp3.SetSize(FRect.Width, FRect.Height);
+      FBmp3.PixelFormat := FBmp2.PixelFormat;
       //手動法 work 不用80MS
       try
-        FBmp3.BeginUpdate(false);
-        FBmp1.BeginUpdate(false);
-        j:=0;
-        for k:=FRect.top to FRect.Bottom-1 do
+        FBmp3.BeginUpdate(False);
+        FBmp1.BeginUpdate(False);
+        j := 0;
+        for k := FRect.top to FRect.Bottom - 1 do
         begin
-          p1:=FBmp2.ScanLine[k];
-          p2:=FBmp3.ScanLine[j];
-          p3:=FBmp1.ScanLine[k];
-          move(p1[FRect.Left*3],p2^,FRect.Width*3);
-          move(p1[FRect.Left*3],p3[FRect.Left*3],FRect.Width*3);
-          inc(j);
+          p1 := FBmp2.ScanLine[k];
+          p2 := FBmp3.ScanLine[j];
+          p3 := FBmp1.ScanLine[k];
+          move(p1[FRect.Left * 3], p2^, FRect.Width * 3);
+          move(p1[FRect.Left * 3], p3[FRect.Left * 3], FRect.Width * 3);
+          Inc(j);
         end;
-      
+
       except
-         on e: Exception do
-         begin
-           bottomline:=j;
-           bottomline:=FBmp3.Width;
-           bottomline:=FBmp3.Height;
-         end;
+        on e: Exception do
+        begin
+          bottomline := j;
+          bottomline := FBmp3.Width;
+          bottomline := FBmp3.Height;
+        end;
       end;
-      FBmp3.EndUpdate(false);
-      FBmp1.EndUpdate(false);
+      FBmp3.EndUpdate(False);
+      FBmp1.EndUpdate(False);
       //stat send out to network
       {//zlib version
       Fms1.clear;
@@ -448,12 +467,13 @@ begin
       FBmp3.SaveToStream(Fms1);
       }
       compress(22);
-      FBmp3.free;
+      FBmp3.Free;
       //break;
     end;
-    inc(i);
+    Inc(i);
   end;
 end;
+
 //CPU 6%
 {
 procedure TScreenMon.GetNext;
@@ -540,60 +560,64 @@ end;
 因为直接对内存中的像素操作，所以转换速度非常快。
 由于pRGBTriple只针对24bit的BMP，所以调用前记得先检测下 bitamp的对象是否24bit位图。。。
 }
-function bintoHex(bin:pbyte;lens:integer): String;
-const HexSymbols = '0123456789ABCDEF';
-var i: integer;
+
+function bintoHex(bin: PByte; lens: integer): string;
+const
+  HexSymbols = '0123456789ABCDEF';
+var
+  i: integer;
 begin
-  SetLength(Result, 2*lens);
-  for i :=  0 to lens-1 do 
-	begin
-    Result[1 + 2*i + 0] := HexSymbols[1 + bin[i] shr 4];
-    Result[1 + 2*i + 1] := HexSymbols[1 + bin[i] and $0F];
+  SetLength(Result, 2 * lens);
+  for i := 0 to lens - 1 do
+  begin
+    Result[1 + 2 * i + 0] := HexSymbols[1 + bin[i] shr 4];
+    Result[1 + 2 * i + 1] := HexSymbols[1 + bin[i] and $0F];
   end;
 end;
+
 //https://wiki.freepascal.org/Fast_direct_pixel_access
 //-- ScanLine 加了 BeginUpdate,EndUpdate 也不保證一定會對，依然空白的情況
 //-- FBmp3 始終有對有不對
 //https://wiki.freepascal.org/Developing_with_Graphics
 //https://wiki.freepascal.org/Accessing_the_Interfaces_directly
-function TScreenMon.GetNext:integer;
+function TScreenMon.GetNext: integer;
 var
-  p1, p2,p3: PDWORD;
-  i, j, k, incX, bottomline: Integer;
-	irow:integer;
-	f:textfile;
+  p1, p2, p3: PDWORD;
+  i, j, k, incX, bottomline: integer;
+  irow: integer;
+  f: textfile;
 begin
   FDC := GetDC(0);
   i := FLine;
   k := -1;
-	result:=-1;
+  Result := -1;
   FBmp2.LoadFromDevice(FDC);
   ReleaseDC(0, FDC);
-	//FBmp2.savetoFile('cap2.bmp');
-	FInc:=PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
-	incX:= FInc div 4;
-	bottomline:=0;
-	FBmp1.BeginUpdate();
+  //FBmp2.savetoFile('cap2.bmp');
+  FInc := PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
+  incX := FInc div 4;
+  bottomline := 0;
+  FBmp1.BeginUpdate();
   FBmp2.BeginUpdate();
-	p1:=PDWORD(FBmp1.RawImage.Data);
-	p2:=PDWORD(FBmp2.RawImage.Data);
+  p1 := PDWORD(FBmp1.RawImage.Data);
+  p2 := PDWORD(FBmp2.RawImage.Data);
   while (i < FHeight) do
   begin
     FRect.Right := 0;
     j := 0;
-		irow:=i*FWidth;
+    irow := i * FWidth;
     while (j < FWidth) do
     begin
-      if (p1[irow+j] <> p2[irow+j]) then
+      if (p1[irow + j] <> p2[irow + j]) then
       begin
         if (FRect.Right < 1) then
         begin
           FRect.Left := j - OFF_SET;
-					//AssignFile(f,'imgdump.txt');
-					//rewrite(f);
-					//Writeln(f,bintoHex(@p1[irow],FWidth*FInc)); 
-					//Writeln(f,bintoHex(@p2[irow],FWidth*FInc));
-					//CloseFile(f); 
+          //AssignFile(f,'imgdump.txt');
+          //rewrite(f);
+          //Writeln(f,bintoHex(@p1[irow],FWidth*FInc));
+          //Writeln(f,bintoHex(@p2[irow],FWidth*FInc));
+          //CloseFile(f);
         end;
         FRect.Right := j + OFF_SET;
       end;
@@ -601,7 +625,7 @@ begin
     end;
     if (FRect.Right > 0) then
     begin
-		  inc(bottomline);
+      Inc(bottomline);
       if (k = i) then
         FRect.Top := i
       else
@@ -610,65 +634,66 @@ begin
       FRect.Bottom := k;
       with FRect do
       begin
-        Left   := Max(Left, 0);
-        Top    := Max(Top, 0);
-        Right  := Min(Right, FWidth);
+        Left := Max(Left, 0);
+        Top := Max(Top, 0);
+        Right := Min(Right, FWidth);
         Bottom := Min(Bottom, FHeight);
       end;
       //start copy rect to send out FBmp3
       FBmp3 := Graphics.TBitmap.Create;
-      FBmp3.SetSize(FRect.Width,FRect.Height);
-      FBmp3.PixelFormat:=FBmp2.PixelFormat;
+      FBmp3.SetSize(FRect.Width, FRect.Height);
+      FBmp3.PixelFormat := FBmp2.PixelFormat;
       //CPU 壓在4%了
       try
-        j:=0;
-				FBmp3.BeginUpdate();
-				p3:=PDWORD(FBmp3.RawImage.Data);
-        for k:=FRect.top to FRect.Bottom-1 do
+        j := 0;
+        FBmp3.BeginUpdate();
+        p3 := PDWORD(FBmp3.RawImage.Data);
+        for k := FRect.top to FRect.Bottom - 1 do
         begin
-          move(p2[k*FWidth+FRect.Left],p3[j*FRect.Width],FRect.Width*FInc);
-					move(p2[k*FWidth+FRect.Left],p1[k*FWidth+FRect.Left],FRect.Width*FInc);
-          inc(j);
+          move(p2[k * FWidth + FRect.Left], p3[j * FRect.Width], FRect.Width * FInc);
+          move(p2[k * FWidth + FRect.Left], p1[k * FWidth + FRect.Left], FRect.Width * FInc);
+          Inc(j);
         end;
-      
+
       except
-         on e: Exception do
-         begin
-           bottomline:=j;
-           bottomline:=FBmp3.Width;
-           bottomline:=FBmp3.Height;
-         end;
+        on e: Exception do
+        begin
+          bottomline := j;
+          bottomline := FBmp3.Width;
+          bottomline := FBmp3.Height;
+        end;
       end;
       FBmp3.EndUpdate();
-      result:=compress(22);
-			//FBmp3.savetoFile('cap3'+IntToStr(bottomline)+'-'+IntToStr(FRect.Left)+','+IntToStr(FRect.Top)+'-'+IntToStr(FRect.Width)+','+IntToStr(FRect.Height)+'.bmp');
-      FBmp3.free;
+      Result := compress(22);
+      //FBmp3.savetoFile('cap3'+IntToStr(bottomline)+'-'+IntToStr(FRect.Left)+','+IntToStr(FRect.Top)+'-'+IntToStr(FRect.Width)+','+IntToStr(FRect.Height)+'.bmp');
+      FBmp3.Free;
     end;
     Inc(i, DEF_STEP);
   end;
   FBmp2.EndUpdate();
-	FBmp1.EndUpdate();
+  FBmp1.EndUpdate();
   FLine := (FLine + 3) mod DEF_STEP;
-	//FBmp1.savetoFile('cap3.bmp');
-	//FBmp1.assign(FBmp2);//奇怪, 用MOVE 的方式無效?? 用這個會好些，但也是怪怪的
+  //FBmp1.savetoFile('cap3.bmp');
+  //FBmp1.assign(FBmp2);//奇怪, 用MOVE 的方式無效?? 用這個會好些，但也是怪怪的
 end;
+
 {
 procedure TScreenMon.GetNext;
 var
   p1, p2,p3, p11,p12: PDWORD;
   i, j, k, incX, bottomline: Integer;
-	f:textfile;
+  f:textfile;
 begin
   FDC := GetDC(GetDesktopWindow);
   i := FLine;
   k := -1;
   FBmp2.LoadFromDevice(FDC);
   ReleaseDC(GetDesktopWindow, FDC);
-	FBmp2.savetoFile('cap2.bmp');
-	FInc:=PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
-	incX:= FInc div 4;
-	bottomline:=0;
-	FBmp1.BeginUpdate();
+  FBmp2.savetoFile('cap2.bmp');
+  FInc:=PIXELFORMAT_BPP[FBmp2.PixelFormat] div 8;
+  incX:= FInc div 4;
+  bottomline:=0;
+  FBmp1.BeginUpdate();
   FBmp2.BeginUpdate();
   while (i < FHeight) do
   begin
@@ -683,11 +708,11 @@ begin
         if (FRect.Right < 1) then
         begin
           FRect.Left := j - OFF_SET;
-					AssignFile(f,'imgdump.txt');
-					rewrite(f);
-					Write(f,bintoHex(@p1[0],FWidth)); 
-					Write(f,bintoHex(@p2[0],FWidth));
-					CloseFile(f); 
+          AssignFile(f,'imgdump.txt');
+          rewrite(f);
+          Write(f,bintoHex(@p1[0],FWidth));
+          Write(f,bintoHex(@p2[0],FWidth));
+          CloseFile(f);
         end;
         FRect.Right := j + OFF_SET;
       end;
@@ -695,7 +720,7 @@ begin
     end;
     if (FRect.Right > 0) then
     begin
-		  inc(bottomline);
+      inc(bottomline);
       if (k = i) then
         FRect.Top := i
       else
@@ -716,14 +741,14 @@ begin
       //CPU 壓在4%了
       try
         j:=0;
-				FBmp3.BeginUpdate();
+        FBmp3.BeginUpdate();
         for k:=FRect.top to FRect.Bottom-1 do
         begin
           p11:=FBmp2.ScanLine[k];
           p12:=FBmp3.ScanLine[j];
-					p3:=FBmp1.ScanLine[k];
+          p3:=FBmp1.ScanLine[k];
           move(p11[FRect.Left*FInc],p12^,FRect.Width*FInc);
-					move(p11[FRect.Left*FInc],p3[FRect.Left*FInc],FRect.Width*FInc);
+          move(p11[FRect.Left*FInc],p3[FRect.Left*FInc],FRect.Width*FInc);
           inc(j);
         end;
       
@@ -737,18 +762,19 @@ begin
       end;
       FBmp3.EndUpdate();
       compress(22);
-			FBmp3.savetoFile('cap3'+IntToStr(bottomline)+'-'+IntToStr(FRect.Left)+','+IntToStr(FRect.Top)+'-'+IntToStr(FRect.Width)+','+IntToStr(FRect.Height)+'.bmp');
+      FBmp3.savetoFile('cap3'+IntToStr(bottomline)+'-'+IntToStr(FRect.Left)+','+IntToStr(FRect.Top)+'-'+IntToStr(FRect.Width)+','+IntToStr(FRect.Height)+'.bmp');
       FBmp3.free;
     end;
     Inc(i, DEF_STEP);
   end;
   FBmp2.EndUpdate();
-	FBmp1.EndUpdate();
+  FBmp1.EndUpdate();
   FLine := (FLine + 3) mod DEF_STEP;
-	FBmp1.savetoFile('cap3.bmp');
-	//FBmp1.assign(FBmp2);//奇怪, 用MOVE 的方式無效?? 用這個會好些，但也是怪怪的
+  FBmp1.savetoFile('cap3.bmp');
+  //FBmp1.assign(FBmp2);//奇怪, 用MOVE 的方式無效?? 用這個會好些，但也是怪怪的
 end;
 }
+
 {procedure TScreenMon.GetPartshot;
 var
   p1, p2: PDWORD;
@@ -758,8 +784,8 @@ begin
   i := FLine;
   k := -1;
   FBmp2.SetSize(FWidth, 1);
-	cBMP2 := CreateCompatibleBitmap(FDC, FWidth, 1);
-	FBmp2.Handle:=cBMP2;
+  cBMP2 := CreateCompatibleBitmap(FDC, FWidth, 1);
+  FBmp2.Handle:=cBMP2;
 
   while (i < FHeight) do
   begin
@@ -775,14 +801,14 @@ begin
       if (p1^ <> p2^) then
       begin
         if (FRect.Right < 1) then 
-				  FRect.Left := j - OFF_SET;
+          FRect.Left := j - OFF_SET;
         FRect.Right := j + OFF_SET;
       end;
       Inc(p1);
       Inc(p2);
       Inc(j, FInc);
     end;
-		
+
     if (FRect.Right > 0) then 
     begin
       if (k = i) then
@@ -796,10 +822,11 @@ begin
     Inc(i, DEF_STEP);
   end;
   ReleaseDC(GetDesktopWindow, FDC);
-	DeleteObject(cBMP2);
+  DeleteObject(cBMP2);
   FLine := (FLine + 3) mod DEF_STEP;
 end;
 }
+
 {
 procedure TScreenMon.SendRect;
 var
@@ -824,9 +851,9 @@ begin
       FBmp3.Width  := FRects[i].Right  - FRects[i].Left;
       FBmp3.Height := FRects[i].Bottom - FRects[i].Top;
       BitBlt(FBmp3.Canvas.Handle, 0, 0, FBmp3.Width, FBmp3.Height, FDC, FRects[i].Left, FRects[i].Top, SRCCOPY);
-			FBmp3.Canvas.Changed;
+      FBmp3.Canvas.Changed;
       BitBlt(FBmp1.Canvas.Handle, FRects[i].Left, FRects[i].Top, FBmp3.Width, FBmp3.Height, FBmp3.Canvas.Handle, 0, 0, SRCCOPY);
-			FBmp1.Canvas.Changed;
+      FBmp1.Canvas.Changed;
       Fms1.WriteBuffer(FRects[i], SizeOf(TRect));
       FBmp3.SaveToStream(Fms1);
     finally
@@ -841,26 +868,27 @@ begin
     FBmp3.Height := 32;
     SetRect(rt, FCurPos.X - 10, FCurPos.Y - 10, FCurPos.X + 22 , FCurPos.Y + 22);
     BitBlt(FBmp3.Canvas.Handle, 0, 0, FBmp3.Width, FBmp3.Height, FBmp1.Canvas.Handle, rt.Left, rt.Top, SRCCOPY);
-		FBmp3.Canvas.Changed;
+    FBmp3.Canvas.Changed;
     Fms1.WriteBuffer(rt, SizeOf(rt));
     FBmp3.SaveToStream(Fms1);
     FCurPos := pt;
     SetRect(rt, FCurPos.X - 10, FCurPos.Y - 10, FCurPos.X + 22 , FCurPos.Y + 22);
     BitBlt(FBmp3.Canvas.Handle, 0, 0, FBmp3.Width, FBmp3.Height, FBmp1.Canvas.Handle, rt.Left, rt.Top, SRCCOPY);
-		FBmp3.Canvas.Changed;
+    FBmp3.Canvas.Changed;
     DrawIcon(FBmp3.Canvas.Handle, 0, 0, FCursor);
     Fms1.WriteBuffer(rt, SizeOf(rt));
     FBmp3.SaveToStream(Fms1);
   end;
   if (Fms1.Size > 0) then 
-	 compress(22);
+   compress(22);
 end;
 }
+
 procedure TScreenMon.SaveRect(rt: TRect);
 var
-  i, j: Integer;
+  i, j: integer;
   rt3: TRect;
-  nt: array[0..8] of Integer;
+  nt: array[0..8] of integer;
 begin
   for i := 0 to 8 do
   begin
@@ -896,37 +924,40 @@ begin
       FRects[i] := rt;
       Exit;
     end;
-  end;  
+  end;
   i := 0;
   for j := 1 to 8 do
   begin
-    if (nt[j] < nt[i]) then i := j;
+    if (nt[j] < nt[i]) then
+      i := j;
   end;
   SetRect(FRects[i], Min(FRects[i].Left, rt.Left), Min(FRects[i].Top, rt.Top), Max(FRects[i].Right, rt.Right), Max(FRects[i].Bottom, rt.Bottom));
 end;
+
 procedure TScreenMon.SendRect;
 begin
   with FRect do
   begin
-    Left   := Max(Left, 0);
-    Top    := Max(Top, 0);
-    Right  := Min(Right, FWidth);
+    Left := Max(Left, 0);
+    Top := Max(Top, 0);
+    Right := Min(Right, FWidth);
     Bottom := Min(Bottom, FHeight);
   end;
   CopyRect(FRect);
 end;
+
 procedure TScreenMon.CopyRect(rt: TRect);
 begin
-  
+
   try
-    FBmp3.Width  := rt.Right  - rt.Left;
+    FBmp3.Width := rt.Right - rt.Left;
     FBmp3.Height := rt.Bottom - rt.Top;
-		BitBlt(FBmp1.Canvas.Handle, rt.Left, rt.Top, FBmp3.Width, FBmp3.Height, FDC, rt.Left, rt.Top, SRCCOPY);
-		FBmp1.Canvas.changed;
+    BitBlt(FBmp1.Canvas.Handle, rt.Left, rt.Top, FBmp3.Width, FBmp3.Height, FDC, rt.Left, rt.Top, SRCCOPY);
+    FBmp1.Canvas.changed;
     BitBlt(FBmp3.Canvas.Handle, 0, 0, FBmp3.Width, FBmp3.Height, FDC, rt.Left, rt.Top, SRCCOPY);
-		FBmp3.Canvas.changed;
-    Fms1.clear;
-		Fms1.WriteBuffer(rt, SizeOf(TRect));
+    FBmp3.Canvas.changed;
+    Fms1.Clear;
+    Fms1.WriteBuffer(rt, SizeOf(TRect));
     FBmp3.SaveToStream(Fms1);
     compress(22);
   finally
@@ -935,52 +966,52 @@ begin
 end;
 
 
-function TScreenMon.compress(nCmd: Byte):integer;
+function TScreenMon.compress(nCmd: byte): integer;
 var
-  jpg:TJpegImage;
-	i,j:integer;
+  jpg: TJpegImage;
+  i, j: integer;
 begin
   try
     FmsOut.Clear;
     Fms1.Position := 0;
-		
-    jpg:=TJpegImage.Create;
-    jpg.CompressionQuality:=90;
-    if nCmd=21 then
+
+    jpg := TJpegImage.Create;
+    jpg.CompressionQuality := 90;
+    if nCmd = 21 then
     begin
       jpg.Assign(FBmp1);
     end
     else
     begin
-		  FmsOut.WriteBuffer(FRect, SizeOf(TRect));
+      FmsOut.WriteBuffer(FRect, SizeOf(TRect));
       jpg.Assign(FBmp3);
     end;
     jpg.SaveToStream(FmsOut);
-    
+
     FmsOut.Position := 0;
-		idataType:=nCmd;
-    j:=0;
-    for i:=0 to length(atermisserver.workers)-1 do
+    idataType := nCmd;
+    j := 0;
+    for i := 0 to length(atermisserver.Workers) - 1 do
     begin
-      if atermisserver.workers[i].needScreen then
+      if atermisserver.Workers[i].NeedScreen then
       begin
-        if atermisserver.workers[i].sendScreen(idataType,FmsOut.Memory, FmsOut.Size )>0 then
+        if atermisserver.Workers[i].SendScreen(idataType, FmsOut.Memory, FmsOut.Size) > 0 then
         begin
-           inc(j);
-				end;
+          Inc(j);
+        end;
       end;
     end;
 
-    if (aclient<>nil) then
+    if (aclient <> nil) then
     begin
-      if aclient.sendScreen(idataType,FmsOut.Memory, FmsOut.Size )>0 then
+      if aclient.SendScreen(idataType, FmsOut.Memory, FmsOut.Size) > 0 then
       begin
-        inc(j);
-			end;
+        Inc(j);
+      end;
     end;
   except
   end;
-	result:=j;
+  Result := j;
 
   Fms1.Clear;
   jpg.Free;

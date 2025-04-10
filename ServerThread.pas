@@ -1,209 +1,219 @@
 unit ServerThread;
 {$mode objfpc}{$H+}
 interface
+
 uses
   Types,
   {$ifdef unix}cthreads, {$endif}
-{$IFDEF WINDOWS}
+  {$IFDEF WINDOWS}
   winsock2,windows,
-{$ENDIF}
-  SysUtils,Classes,dateutils,syncobjs,socketfunc,atermisworker;
+  {$ENDIF}
+  SysUtils, Classes, dateutils, syncobjs, socketfunc, atermisworker;
+
 const
-  BUFSIZE=4096*2;
+  BUFSIZE = 4096 * 2;
   {$IFDEF unix}
     {$DEFINE TSOCKET := Integer}
   	{$DEFINE closesocket:=close}
   	INVALID_SOCKET = -1;
   	SOCKET_ERROR = -1;
   {$ENDIF}
+
 type
-    TCPServerThread = class(TThread)
-	public
-		mEvent:TEventObject;
-    perhapsbeclosed:boolean;
-		serverhost:string;
-		serverport:integer;
-		workers:array of Tatermisworker;
-	  function bindto(servIP:string;PORT:integer):integer;
-    procedure sendOut(data:pbyte;size:integer);
-    procedure close();
-		procedure log(s:string);
-		constructor Create(b:boolean;maxworkers:integer);
+  TCPServerThread = class (TThread)
+  public
+    mEvent: TEventObject;
+    perhapsbeclosed: boolean;
+    serverhost: string;
+    serverport: integer;
+    Workers: array of TAtermisWorker;
+    function bindto(servIP: string; PORT: integer): integer;
+    procedure sendOut(Data: pbyte; size: integer);
+    procedure Close();
+    procedure log(s: string);
+    constructor Create(b: boolean; maxworkers: integer);
     procedure doTerminate;
-		destructor Destroy; override; 
+    destructor Destroy; override;
   private
-    
-    timeouts:integer;
-		logger:textfile;
+
+    timeouts: integer;
+    logger: textfile;
   protected
-    svrSock:Integer;//Socket物件
-		
+    svrSock: integer;//Socket物件
+
     procedure Execute; override;
-end;
+  end;
 
 implementation
-function GetIPByName(const Name:String):String;
+
+function GetIPByName(const Name: string): string;
 var
-  r:PHostEnt;
-  a:TInAddr;
+  r: PHostEnt;
+  a: TInAddr;
 begin
-  Result:='';
-  r:= gethostbyname(PChar(Name));
+  Result := '';
+  r := gethostbyname(PChar(Name));
   if Assigned(r) then
-    begin
-      a:=PInAddr(r^.h_Addr_List^)^;
-      Result:=inet_ntoa(a);
-    end;
-end;
-destructor TCPServerThread.Destroy;
-var
-  i:integer;
-begin
-	for i:=0 to length(workers)-1 do
-		if workers[i].isWaiting then
-		begin
-      workers[i].free;
-		end;
-  inherited; // Also called parent class destroyer
-end;
-constructor TCPServerThread.Create(b:boolean;maxworkers:integer);
-var
-  i:integer;
-begin
-  inherited Create(b);
-  Freeonterminate:=false;
-	mEvent := TEventObject.Create(nil,true,false,'');
-	perhapsbeclosed:=true;
-	svrSock:=-1;
-	setlength(workers,maxworkers);
-  assignfile(logger,'server.log');
-	rewrite(logger);
-	for i:=0 to maxworkers-1 do
-	begin
-	  workers[i]:=Tatermisworker.create(false,'worker'+Inttostr(i)+'.log');
-		workers[i].atermisidx:=i;
-	end;
-	log('worker created...');
+  begin
+    a := PInAddr(r^.h_Addr_List^)^;
+    Result := inet_ntoa(a);
+  end;
 end;
 
-function TCPServerThread.bindto(servIP:string;PORT:integer):integer;
+destructor TCPServerThread.Destroy;
 var
-  wsd:WSADATA;
-  timeout:Ttimeval;
-  addr : TSockAddrIn;
+  i: integer;
 begin
-  if (WSAStartup(MAKEWORD(2,0),wsd)<0) then 
-	 exit(-11);
-  svrSock:=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);
-  
+  for i := 0 to length(Workers) - 1 do
+    if Workers[i].isWaiting then
+    begin
+      Workers[i].Free;
+    end;
+  inherited; // Also called parent class destroyer
+end;
+
+constructor TCPServerThread.Create(b: boolean; maxworkers: integer);
+var
+  i: integer;
+begin
+  inherited Create(b);
+  Freeonterminate := False;
+  mEvent := TEventObject.Create(nil, True, False, '');
+  perhapsbeclosed := True;
+  svrSock := -1;
+  setlength(Workers, maxworkers);
+  assignfile(logger, 'server.log');
+  rewrite(logger);
+  for i := 0 to maxworkers - 1 do
+  begin
+    Workers[i] := TAtermisWorker.Create(False, 'worker' + IntToStr(i) + '.log');
+    Workers[i].AtermisIdx := i;
+  end;
+  log('worker created...');
+end;
+
+function TCPServerThread.bindto(servIP: string; PORT: integer): integer;
+var
+  wsd: WSADATA;
+  timeout: Ttimeval;
+  addr: TSockAddrIn;
+begin
+  if (WSAStartup(MAKEWORD(2, 0), wsd) < 0) then
+    exit(-11);
+  svrSock := socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+
   //if (svrSock=INVALID_SOCKET) then
   //   exit(-2);
-  ZeroMemory(@addr,sizeof(addr));
-  addr.sin_family:=AF_INET;
-  addr.sin_port:=htons(port);
-  if servIP='0.0.0.0' then
+  ZeroMemory(@addr, sizeof(addr));
+  addr.sin_family := AF_INET;
+  addr.sin_port := htons(port);
+  if servIP = '0.0.0.0' then
   begin
-    addr.sin_addr.S_addr:=htonl(INADDR_ANY);
+    addr.sin_addr.S_addr := htonl(INADDR_ANY);
   end
   else
   begin
-     addr.sin_addr.S_addr:=inet_addr(pchar(servIP));
+    addr.sin_addr.S_addr := inet_addr(PChar(servIP));
   end;
-  if bind(svrSock,addr,sizeof(addr))=SOCKET_ERROR{<>0} then
+  if bind(svrSock, addr, sizeof(addr)) = SOCKET_ERROR{<>0} then
     exit(-3);
-  if listen(svrSock,5)<>0 then
+  if listen(svrSock, 5) <> 0 then
   begin
     exit(-4);
   end;
-  perhapsbeclosed:=false;
-  result:=0;
-	serverhost:=servIP;
-	serverport:=port;
+  perhapsbeclosed := False;
+  Result := 0;
+  serverhost := servIP;
+  serverport := port;
 end;
-procedure TCPServerThread.sendOut(data:pbyte;size:integer);
+
+procedure TCPServerThread.sendOut(Data: pbyte; size: integer);
 begin
-  send(svrSock,data,size,0);
+  Send(svrSock, Data, size, 0);
 end;
-procedure TCPServerThread.close();
+
+procedure TCPServerThread.Close();
 begin
   closesocket(svrSock);
-	svrSock:=-1;
-	perhapsbeclosed:=true;
+  svrSock := -1;
+  perhapsbeclosed := True;
 end;
-procedure TCPServerThread.log(s:string);
+
+procedure TCPServerThread.log(s: string);
 begin
-  writeln(logger,s);
+  writeln(logger, s);
 end;
+
 procedure TCPServerThread.Execute;
 var
-  res,i:integer;
-	timeval:TTimeVal;
-	client:PSockAddr;
-	namelen:PInteger;
-	clientskt:integer;
+  res, i: integer;
+  timeval: TTimeVal;
+  client: PSockAddr;
+  namelen: PInteger;
+  clientskt: integer;
 begin
-  timeval.tv_sec:=timeouts*1000;
-  timeval.tv_usec:=50;
-	if client=nil then
-	begin
-		new(client);
-		new(namelen);
-		namelen^:=sizeof(client^);
-	end;
-	log('TCPServerThread working...');
-  while Terminated=false do
-	begin
-	  if svrSock=-1 then
-		begin
-		  log('TCPServerThread suspended...');
+  timeval.tv_sec := timeouts * 1000;
+  timeval.tv_usec := 50;
+  if client = nil then
+  begin
+    new(client);
+    new(namelen);
+    namelen^ := sizeof(client^);
+  end;
+  log('TCPServerThread working...');
+  while Terminated = False do
+  begin
+    if svrSock = -1 then
+    begin
+      log('TCPServerThread suspended...');
       mEvent.WaitFor(INFINITE);
       mEvent.ResetEvent;
-			if Terminated then
-			  continue;
-			if svrSock=-1 then
-			begin
-        res:=bindTo(serverhost,serverport);
-  			if res<0 then
-  			begin
-				  doTerminate();
-  			  break;
-  			end;
-				log('TCPServerThread binded...');
-			end;
-		end;
-		clientskt:=accept(svrSock,client,namelen);
-		log('new socket imcoming:'+inttostr(clientskt));
-		res:=0;
-		for i:=0 to length(workers)-1 do
-    begin
-	    if workers[i].isWaiting then
-			begin
-			  log('TCPServerThread workers['+inttostr(i)+'] taken');
-        workers[i].doWork(clientskt);
-				workers[i].ShowClientInfo;
-				res:=1;
-        break;
-			end;
+      if Terminated then
+        continue;
+      if svrSock = -1 then
+      begin
+        res := bindTo(serverhost, serverport);
+        if res < 0 then
+        begin
+          doTerminate();
+          break;
+        end;
+        log('TCPServerThread binded...');
+      end;
     end;
-		if res=0 then
-		 closesocket(clientskt);
+    clientskt := accept(svrSock, client, namelen);
+    log('new socket imcoming:' + IntToStr(clientskt));
+    res := 0;
+    for i := 0 to length(Workers) - 1 do
+    begin
+      if Workers[i].isWaiting then
+      begin
+        log('TCPServerThread workers[' + IntToStr(i) + '] taken');
+        Workers[i].doWork(clientskt);
+        Workers[i].ShowClientInfo;
+        res := 1;
+        break;
+      end;
+    end;
+    if res = 0 then
+      closesocket(clientskt);
   end;//end while true
-	dispose(client);
-	dispose(namelen);
-	closefile(logger);
+  dispose(client);
+  dispose(namelen);
+  closefile(logger);
 end;
 
 procedure TCPServerThread.doTerminate;
 var
-  i:integer;
+  i: integer;
 begin
   // Signal event to wake up the thread
-	Terminate;
+  Terminate;
   mEvent.SetEvent;
-  CLOSE();
-	for i:=0 to length(workers)-1 do
+  Close();
+  for i := 0 to length(Workers) - 1 do
   begin
-      workers[i].doterminate;
+    Workers[i].doterminate;
   end;
   // Base Terminate method (to set Terminated=true)
 end;

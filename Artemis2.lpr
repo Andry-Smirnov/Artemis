@@ -7,8 +7,10 @@ uses
   cthreads,
   {$ENDIF}{$ENDIF}
   Interfaces, // this includes the LCL widgetset
-  Forms, lazmouseandkeyinput, mainform, frmView
-  { you can add units after this };
+  Forms, iphlpapi,
+  //
+  lazmouseandkeyinput, main, frmView, ScreenMon, AtermisClient,
+  atermisworker, TCPWorkerThread, ServerThread, AudioThread;
 
 {$R *.res}
 
@@ -16,7 +18,7 @@ begin
   RequireDerivedFormResource:=True;
   Application.Scaled:=True;
   Application.Initialize;
-  Application.CreateForm(TfrmMain, frmMain);
+  Application.CreateForm(TMainForm, MainForm);
   Application.CreateForm(TViewForm, ViewForm);
   Application.Run;
 end.
